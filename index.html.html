@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plataforma Química 3D - Cinética Química</title>
+    <style>
+        body { margin: 0; overflow: hidden; display: flex; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1e272e; color: #d2dae2; }
+        
+        #sidebar { 
+            width: 380px; 
+            background: #2c3e50; 
+            padding: 20px; 
+            box-shadow: 2px 0 15px rgba(0,0,0,0.5); 
+            z-index: 10; 
+            overflow-y: auto; 
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        
+        #canvas-container { 
+            flex-grow: 1; 
+            height: 100vh; 
+            width: calc(100vw - 380px);
+            position: relative;
+        }
+
+        h1 { font-size: 1.3em; color: #ecf0f1; margin-top: 0; border-bottom: 2px solid #e67e22; padding-bottom: 8px; }
+        h2 { font-size: 1.0em; color: #f39c12; margin-top: 20px; margin-bottom: 10px; }
+        p { font-size: 0.85em; line-height: 1.5; text-align: justify; }
+        
+        .control-group { background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px; margin-bottom: 12px; }
+        label { display: block; font-size: 0.8em; margin-bottom: 5px; color: #bdc3c7; font-weight: bold; }
+        input[type=range] { width: 100%; cursor: pointer; accent-color: #e67e22; }
+        
+        .metric-card { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+        .metric-item { background: #34495e; padding: 8px; border-radius: 4px; text-align: center; border: 1px solid #7f8c8d; }
+        .metric-value { font-size: 1.2em; font-weight: bold; color: #f1c40f; }
+        .metric-label { font-size: 0.68em; color: #b2bec3; text-transform: uppercase; }
+
+        .tag-info { display: inline-block; background: #e67e22; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.75em; font-weight: bold; margin-bottom: 10px; }
+        
+        .toggle-btn { width: 100%; padding: 10px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 5px; transition: background 0.2s; }
+        .toggle-btn.off { background: #c0392b; }
+        
+        .legenda { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.75em; margin-top: 15px; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px; }
+        .legenda-item { display: flex; align-items: center; gap: 5px; }
+        .bola { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h1>Simulador Cinético 3D</h1>
+        <p>Ajuste temperatura, concentração e catálise para observar a teoria das colisões efetivas (A + B &rarr; Produto C).</p>
+        
+        <span class="tag-info">Parâmetros Cinéticos</span>
+        
+        <div class="control-group">
+            <label for="sliderTemp">Temperatura (Cinética T): <span id="valTemp">300</span> K</label>
+            <input type="range" id="sliderTemp" min="150" max="800" step="10" value="300" oninput="atualizarParametros()">
+        </div>
+
+        <div class="control-group">
+            <label for="sliderConc">Concentração (Qtd. Partículas): <span id="valConc">40</span></label>
+            <input type="range" id="sliderConc" min="10" max="90" step="5" value="40" oninput="regerarParticulas()">
+        </div>
+
+        <div class="control-group">
+            <label>Estado Catalítico:</label>
+            <button id="btnCatalisador" class="toggle-btn off" onclick="toggleCatalisador()">Catalisador: DESLIGADO (E<sub>a</sub> alta)</button>
+        </div>
+
+        <h2>Métricas de Reação</h2>
+        <div class="metric-card">
+            <div class="metric-item">
+                <div class="metric-label">Reagentes</div>
+                <div class="metric-value" id="valReagentes">40</div>
+            </div>
+            <div class="metric-item">
+                <div class="metric-label">Produtos</div>
+                <div class="metric-value" id="valProdutos">0</div>
+            </div>
+        </div>
+
+        <div class="legenda">
+            <div class="legenda-item"><span class="bola" style="background:#3498db"></span> Reagente A</div>
+            <div class="legenda-item"><span class="bola" style="background:#e74c3c"></span> Reagente B</div>
+            <div class="legenda-item"><span class="bola" style="background:#9b59b6"></span> Produto C</div>
+        </div>
+
+        <h2>Fundamentação</h2>
+        <div id="info-panel">
+            <p>Colisões com energia cinética &ge; <i>E<sub>a</sub></i> geram produto roxo. O catalisador reduz <i>E<sub>a</sub></i>, permitindo conversão com menor velocidade de impacto relacional.</p>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <!-- Three.js e OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1e272e);
+
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+        camera.position.set(0, 0, 14);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+        dirLight.position.set(5, 10, 5);
+        scene.add(dirLight);
+
+        let modelGroup = new THREE.Group();
+        scene.add(modelGroup);
+
+        // Caixa delimitadora do reator (wireframe)
+        const boxSize = 7.0;
+        const boxGeo = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
+        const boxEdges = new THREE.EdgesGeometry(boxGeo);
+        const boxLine = new THREE.LineSegments(boxEdges, new THREE.LineBasicMaterial({ color: 0x7f8c8d, transparent: true, opacity: 0.3 }));
+        modelGroup.add(boxLine);
+
+        // Materiais
+        const matA = new THREE.MeshStandardMaterial({ color: 0x3498db, roughness: 0.3 });
+        const matB = new THREE.MeshStandardMaterial({ color: 0xe74c3c, roughness: 0.3 });
+        const matC = new THREE.MeshStandardMaterial({ color: 0x9b59b6, roughness: 0.3 });
+        const sphereGeo = new THREE.SphereGeometry(0.25, 16, 16);
+
+        let particulas = [];
+        let temperatura = 300;
+        let catalisadorLigado = false;
+        let limiarEnergia = 0.08; 
+        let isResetting = false;
+
+        function atualizarParametros() {
+            temperatura = parseFloat(document.getElementById('sliderTemp').value);
+            document.getElementById('valTemp').innerText = temperatura;
+            limiarEnergia = catalisadorLigado ? 0.03 : 0.09;
+        }
+
+        function toggleCatalisador() {
+            catalisadorLigado = !catalisadorLigado;
+            const btn = document.getElementById('btnCatalisador');
+            if (catalisadorLigado) {
+                btn.innerHTML = 'Catalisador: LIGADO (E<sub>a</sub> reduzida)';
+                btn.className = 'toggle-btn';
+            } else {
+                btn.innerHTML = 'Catalisador: DESLIGADO (E<sub>a</sub> alta)';
+                btn.className = 'toggle-btn off';
+            }
+            atualizarParametros();
+        }
+
+        function limparParticulas() {
+            particulas.forEach(p => {
+                scene.remove(p.mesh);
+            });
+            particulas = [];
+        }
+
+        function regerarParticulas() {
+            limparParticulas();
+            isResetting = false;
+            const qtd = parseInt(document.getElementById('sliderConc').value);
+            
+            for(let i = 0; i < qtd; i++) {
+                const tipo = i % 2 === 0 ? 'A' : 'B';
+                const mat = tipo === 'A' ? matA : matB;
+                const mesh = new THREE.Mesh(sphereGeo, mat);
+                
+                mesh.position.set(
+                    (Math.random() - 0.5) * boxSize * 0.9,
+                    (Math.random() - 0.5) * boxSize * 0.9,
+                    (Math.random() - 0.5) * boxSize * 0.9
+                );
+
+                const speedMult = 0.00008 * temperatura;
+                const vx = (Math.random() - 0.5) * speedMult;
+                const vy = (Math.random() - 0.5) * speedMult;
+                const vz = (Math.random() - 0.5) * speedMult;
+
+                modelGroup.add(mesh);
+                particulas.push({
+                    mesh: mesh,
+                    tipo: tipo,
+                    vx: vx,
+                    vy: vy,
+                    vz: vz
+                });
+            }
+            
+            document.getElementById('info-panel').innerHTML = `
+                <p>Colisões com energia cinética &ge; <i>E<sub>a</sub></i> geram produto roxo. O catalisador reduz <i>E<sub>a</sub></i>, permitindo conversão com menor velocidade de impacto relacional.</p>
+            `;
+            atualizarPlacar();
+        }
+
+        function atualizarPlacar() {
+            let reg = 0, prod = 0;
+            particulas.forEach(p => {
+                if (p.tipo === 'C') prod++;
+                else reg++;
+            });
+            document.getElementById('valReagentes').innerText = reg;
+            document.getElementById('valProdutos').innerText = prod;
+            document.getElementById('valConc').innerText = particulas.length;
+
+            // Gatilho de conversão total (Reagentes = 0)
+            if (reg === 0 && particulas.length > 0 && !isResetting) {
+                isResetting = true;
+                document.getElementById('info-panel').innerHTML = `
+                    <p style="color: #2ecc71; font-weight: bold;">✔ Conversão Total Atingida (Reagentes = 0)</p>
+                    <p>O consumo estequiométrico foi concluído. Reiniciando simulação cinética em 3 segundos...</p>
+                `;
+                setTimeout(() => {
+                    regerarParticulas();
+                }, 3000);
+            }
+        }
+
+        regerarParticulas();
+        atualizarParametros();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            modelGroup.rotation.y += 0.002;
+
+            const halfBox = boxSize / 2 - 0.25;
+            const speedScale = Math.sqrt(temperatura / 300);
+
+            if (!isResetting) {
+                particulas.forEach(p => {
+                    const velMult = speedScale * 0.3;
+                    p.mesh.position.x += p.vx * velMult * 10;
+                    p.mesh.position.y += p.vy * velMult * 10;
+                    p.mesh.position.z += p.vz * velMult * 10;
+
+                    if (Math.abs(p.mesh.position.x) > halfBox) { p.vx *= -1; p.mesh.position.x = Math.sign(p.mesh.position.x) * halfBox; }
+                    if (Math.abs(p.mesh.position.y) > halfBox) { p.vy *= -1; p.mesh.position.y = Math.sign(p.mesh.position.y) * halfBox; }
+                    if (Math.abs(p.mesh.position.z) > halfBox) { p.vz *= -1; p.mesh.position.z = Math.sign(p.mesh.position.z) * halfBox; }
+                });
+
+                for (let i = 0; i < particulas.length; i++) {
+                    for (let j = i + 1; j < particulas.length; j++) {
+                        const p1 = particulas[i];
+                        const p2 = particulas[j];
+
+                        const isPairAB = (p1.tipo === 'A' && p2.tipo === 'B') || (p1.tipo === 'B' && p2.tipo === 'A');
+                        if (isPairAB) {
+                            const dist = p1.mesh.position.distanceTo(p2.mesh.position);
+                            if (dist < 0.5) {
+                                const vRel = Math.sqrt((p1.vx - p2.vx)**2 + (p1.vy - p2.vy)**2 + (p1.vz - p2.vz)**2) * speedScale;
+                                if (vRel >= limiarEnergia) {
+                                    p1.tipo = 'C';
+                                    p1.mesh.material = matC;
+                                    p2.tipo = 'C';
+                                    p2.mesh.material = matC;
+                                    atualizarPlacar();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        });
+    </script>
+</body>
+</html>
